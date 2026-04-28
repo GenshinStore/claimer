@@ -1,0 +1,14 @@
+{
+  "name": "wa-claimer-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp bot auto open dana link (Termux)",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "whatsapp-web.js": "^1.25.0"
+  }
+}
