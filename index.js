@@ -1,5 +1,4 @@
-// Tambahkan 'Browsers' di baris pertama ini
-const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
@@ -9,14 +8,16 @@ const linkRegex = /(https?:\/\/)?([\w-]+\.)?(dana\.id|link\.dana\.id|gopay\.co\.
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    
+    // 🔥 PERBAIKAN: Ambil versi WA Web terbaru otomatis agar terhindar dari Error 405
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`Meminta QR menggunakan WA v${version.join('.')}`);
 
     const sock = makeWASocket({
+        version, // Memasukkan versi terbaru ke socket
         auth: state,
-        // 1. UBAH SEMENTARA: Ganti 'silent' jadi 'info' agar kita bisa lihat prosesnya
-        logger: pino({ level: 'info' }), 
-        // 2. UBAH: Gunakan identitas browser yang lebih aman (Linux Chrome)
-        browser: Browsers.ubuntu('Chrome'), 
-        // Tambahan opsi untuk memaksa koneksi lebih stabil
+        logger: pino({ level: 'silent' }), // Log dikembalikan ke silent agar ringan
+        browser: ['TermuxClaimer', 'Chrome', '1.0.0'], // Menggunakan nama browser standar
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 10000
     });
@@ -47,11 +48,9 @@ async function startBot() {
             }
         } else if (connection === 'open') {
             console.log('⚡ BOT SUPER CEPAT (BAILEYS) SIAP!');
-            // Jika sudah berhasil konek, kita bisa set log kembali ke silent nanti
         }
     });
 
-    // ... (Bagian sock.ev.on('messages.upsert', ...) tetap sama seperti sebelumnya) ...
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
