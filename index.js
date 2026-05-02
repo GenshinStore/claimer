@@ -1,70 +1,76 @@
-process.setMaxListeners(0);
+const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const { spawn } = require('child_process');
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const { exec } = require('child_process');
+const TARGET_GROUP_ID = '120363426296094605@g.us'; // Pastikan format JID grup benar (akhiran @g.us)
 
-const TARGET_GROUP_ID = '120363426296094605@g.us';
-
-// Inisialisasi client dengan pengaturan Puppeteer yang sangat ringan untuk Termux
-const client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'claimer_bot' }), // Menyimpan sesi login agar tidak perlu scan QR terus
-    puppeteer: {
-        executablePath: '/data/data/com.termux/files/usr/bin/chromium-browser',
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-            '--disable-extensions',
-            '--disable-background-networking',
-            '--disable-sync',
-            '--disable-translate',
-            '--metrics-recording-only',
-            '--mute-audio',
-            '--single-process' // Penting untuk performa di Termux Android
-        ]
-    }
-});
-
-// Menampilkan QR Code di terminal (hanya jika sesi belum ada)
-client.on('qr', qr => {
-    console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
-});
-
-// Indikator bahwa bot sudah terhubung dan berjalan
-client.on('ready', () => {
-    console.log('BOT SUPER CEPAT SIAP!');
-});
-
-// Regex untuk mendeteksi format link e-wallet
+// Regex untuk e-wallet
 const linkRegex = /(https?:\/\/)?([\w-]+\.)?(dana\.id|link\.dana\.id|gopay\.co\.id|app\.gopay\.co\.id|shopeepay\.co\.id|shopee\.co\.id\/universal-link)(\/[^\s]*)?/gi;
 
-client.on('message', msg => {
-    // 1. FILTER AWAL: Pastikan pesan dari grup target dan berupa teks (Bukan media/dokumen)
-    if (msg.from !== TARGET_GROUP_ID || msg.type !== 'chat' || !msg.body) return;
+async function startBot() {
+    // Menyimpan sesi login di folder 'auth_info_baileys' agar tidak perlu scan QR terus
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
-    // 2. OPTIMASI KECEPATAN (QUICK CHECK): 
-    // Menggunakan `.includes()` jauh lebih ringan dan cepat daripada langsung menjalankan Regex.
-    const bodyLower = msg.body.toLowerCase();
-    if (!bodyLower.includes('dana') && !bodyLower.includes('gopay') && !bodyLower.includes('shopee')) return;
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true,
+        // WAJIB: Mematikan log agar Termux tidak lag saat menerima banyak pesan
+        logger: pino({ level: 'silent' }), 
+        // Mengelabui WA agar terlihat seperti session biasa
+        browser: ['TermuxClaimer', 'Chrome', '1.0.0']
+    });
 
-    // 3. EKSTRAKSI LINK: Jika lolos filter cepat di atas, baru jalankan Regex
-    const matches = msg.body.match(linkRegex);
-    if (!matches) return;
+    // Simpan kredensial setiap kali ada pembaruan sesi
+    sock.ev.on('creds.update', saveCreds);
 
-    // 4. EKSEKUSI SUPER CEPAT (FIRE AND FORGET)
-    for (let i = 0; i < matches.length; i++) {
-        // Pastikan format link memiliki awalan http/https agar termux-open-url tidak error
-        let link = matches[i].startsWith('http') ? matches[i] : 'https://' + matches[i];
+    // Indikator koneksi
+    sock.ev.on('connection.update', (update) => {
+        const { connection } = update;
+        if (connection === 'open') {
+            console.log(' BOT SUPER CEPAT (BAILEYS) SIAP!');
+        }
+    });
 
-        // Eksekusi langsung tanpa mengecek duplikat sama sekali
-        exec(`termux-open-url "${link}"`, { windowsHide: true });
-    }
-});
+    // Event saat menerima pesan baru
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        // Hanya proses pesan baru
+        if (type !== 'notify') return;
+        const msg = messages[0];
 
-// Memulai client WhatsApp
-client.initialize();
+        // Pastikan ada isinya
+        if (!msg.message) return;
+
+        // 1. FILTER GRUP TARGET
+        const from = msg.key.remoteJid;
+        if (from !== TARGET_GROUP_ID) return;
+
+        // Ekstrak teks pesan (Struktur JSON Baileys sedikit berbeda dari whatsapp-web.js)
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        if (!text) return;
+
+        // 2. OPTIMASI KECEPATAN (QUICK CHECK)
+        const bodyLower = text.toLowerCase();
+        if (!bodyLower.includes('dana') && !bodyLower.includes('gopay') && !bodyLower.includes('shopee')) return;
+
+        // 3. EKSTRAKSI LINK
+        const matches = text.match(linkRegex);
+        if (!matches) return;
+
+        // 4. EKSEKUSI SUPER CEPAT DENGAN SPAWN (FIRE AND FORGET)
+        for (let i = 0; i < matches.length; i++) {
+            let link = matches[i].startsWith('http') ? matches[i] : 'https://' + matches[i];
+
+            // Menggunakan spawn dengan { detached: true } agar langsung dilepas ke OS tanpa delay
+            const child = spawn('termux-open-url', [link], {
+                detached: true,
+                stdio: 'ignore' // Abaikan output terminal untuk menghemat RAM
+            });
+            child.unref(); // Biarkan proses pembukaan link berjalan independen
+            
+            console.log(` Link terdeteksi dan dieksekusi: ${link}`);
+        }
+    });
+}
+
+// Menjalankan bot
+startBot();
