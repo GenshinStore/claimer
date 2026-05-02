@@ -1,10 +1,10 @@
-const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+// Tambahkan 'Browsers' di baris pertama ini
+const { default: makeWASocket, useMultiFileAuthState, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const { spawn } = require('child_process');
-const qrcode = require('qrcode-terminal'); // Tambahkan library ini
+const qrcode = require('qrcode-terminal');
 
 const TARGET_GROUP_ID = '120363426296094605@g.us';
-
 const linkRegex = /(https?:\/\/)?([\w-]+\.)?(dana\.id|link\.dana\.id|gopay\.co\.id|app\.gopay\.co\.id|shopeepay\.co\.id|shopee\.co\.id\/universal-link)(\/[^\s]*)?/gi;
 
 async function startBot() {
@@ -12,45 +12,46 @@ async function startBot() {
 
     const sock = makeWASocket({
         auth: state,
-        // printQRInTerminal: true, <--- INI SUDAH DIHAPUS
-        logger: pino({ level: 'silent' }), 
-        browser: ['TermuxClaimer', 'Chrome', '1.0.0']
+        // 1. UBAH SEMENTARA: Ganti 'silent' jadi 'info' agar kita bisa lihat prosesnya
+        logger: pino({ level: 'info' }), 
+        // 2. UBAH: Gunakan identitas browser yang lebih aman (Linux Chrome)
+        browser: Browsers.ubuntu('Chrome'), 
+        // Tambahan opsi untuk memaksa koneksi lebih stabil
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 10000
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // LOGIKA BARU UNTUK KONEKSI & MENAMPILKAN QR MANUAL
-    // LOGIKA BARU UNTUK KONEKSI & MENAMPILKAN QR MANUAL
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // Jika ada QR baru, tampilkan di terminal
         if (qr) {
             qrcode.generate(qr, { small: true });
             console.log('👆 Silakan scan QR Code di atas!');
         }
 
-        // Jika koneksi terputus
         if (connection === 'close') {
             const reason = lastDisconnect.error?.output?.statusCode;
-            const shouldReconnect = reason !== 401; // 401 = Logged out
+            const shouldReconnect = reason !== 401; 
 
             console.log(`❌ Koneksi terputus! (Kode Error: ${reason})`);
-            console.log('Pesan Error Asli:', lastDisconnect.error?.message);
 
             if (shouldReconnect) {
                 console.log('🔄 Mencoba menyambung kembali dalam 3 detik...');
                 setTimeout(() => {
                     startBot();
-                }, 3000); // Diberi jeda 3 detik agar terminal tidak nge-spam
+                }, 3000);
             } else {
-                console.log('⚠️ Sesi tidak valid atau ter-logout. Silakan hapus folder auth_info_baileys dan scan ulang.');
+                console.log('⚠️ Sesi tidak valid. Silakan hapus folder auth_info_baileys dan scan ulang.');
             }
         } else if (connection === 'open') {
             console.log('⚡ BOT SUPER CEPAT (BAILEYS) SIAP!');
+            // Jika sudah berhasil konek, kita bisa set log kembali ke silent nanti
         }
     });
 
+    // ... (Bagian sock.ev.on('messages.upsert', ...) tetap sama seperti sebelumnya) ...
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
         const msg = messages[0];
@@ -70,13 +71,8 @@ async function startBot() {
 
         for (let i = 0; i < matches.length; i++) {
             let link = matches[i].startsWith('http') ? matches[i] : 'https://' + matches[i];
-
-            const child = spawn('termux-open-url', [link], {
-                detached: true,
-                stdio: 'ignore'
-            });
+            const child = spawn('termux-open-url', [link], { detached: true, stdio: 'ignore' });
             child.unref(); 
-            
             console.log(`🚀 Link dieksekusi: ${link}`);
         }
     });
