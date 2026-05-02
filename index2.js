@@ -3,27 +3,22 @@ const pino = require('pino');
 const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
-// Definisikan Grup Utama dan Grup Kedua
-const GRUP_UTAMA = '120363408426078537@g.us';
-const GRUP_KEDUA = '120363426296094605@g.us'; // Ganti jika ID grup keduamu berbeda
-
-const TARGET_GROUP_IDS = [GRUP_UTAMA, GRUP_KEDUA];
-
+const TARGET_GROUP_ID = '120363408426078537@g.us';
+// const TARGET_GROUP_ID = '120363426296094605@g.us';
 const linkRegex = /(https?:\/\/)?([\w-]+\.)?(dana\.id|link\.dana\.id|gopay\.co\.id|app\.gopay\.co\.id|shopeepay\.co\.id|shopee\.co\.id\/universal-link)(\/[^\s]*)?/gi;
-
-const claimedLinks = new Set();
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-    const { version } = await fetchLatestBaileysVersion();
     
+    // 🔥 PERBAIKAN: Ambil versi WA Web terbaru otomatis agar terhindar dari Error 405
+    const { version, isLatest } = await fetchLatestBaileysVersion();
     console.log(`Meminta QR menggunakan WA v${version.join('.')}`);
 
     const sock = makeWASocket({
-        version,
+        version, // Memasukkan versi terbaru ke socket
         auth: state,
-        logger: pino({ level: 'silent' }),
-        browser: ['TermuxClaimer', 'Chrome', '1.0.0'],
+        logger: pino({ level: 'silent' }), // Log dikembalikan ke silent agar ringan
+        browser: ['TermuxClaimer', 'Chrome', '1.0.0'], // Menggunakan nama browser standar
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 10000
     });
@@ -42,14 +37,18 @@ async function startBot() {
             const reason = lastDisconnect.error?.output?.statusCode;
             const shouldReconnect = reason !== 401; 
 
+            console.log(`❌ Koneksi terputus! (Kode Error: ${reason})`);
+
             if (shouldReconnect) {
                 console.log('🔄 Mencoba menyambung kembali dalam 3 detik...');
-                setTimeout(startBot, 3000);
+                setTimeout(() => {
+                    startBot();
+                }, 3000);
             } else {
                 console.log('⚠️ Sesi tidak valid. Silakan hapus folder auth_info_baileys dan scan ulang.');
             }
         } else if (connection === 'open') {
-            console.log('⚡ BOT SIAP! (Mode Prioritas Grup Aktif)');
+            console.log('⚡ BOT SUPER CEPAT (BAILEYS) SIAP!');
         }
     });
 
@@ -59,9 +58,7 @@ async function startBot() {
         if (!msg.message) return;
 
         const from = msg.key.remoteJid;
-        
-        // Pastikan hanya merespon grup yang ada di daftar
-        if (!TARGET_GROUP_IDS.includes(from)) return;
+        if (from !== TARGET_GROUP_ID) return;
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
         if (!text) return;
@@ -72,41 +69,11 @@ async function startBot() {
         const matches = text.match(linkRegex);
         if (!matches) return;
 
-        // Fungsi khusus untuk memproses link
-        const eksekusiLink = (link, sumberGrup) => {
-            // Cek apakah link sudah ada di memory
-            if (claimedLinks.has(link)) {
-                console.log(`⏭️ SKIP: Link sudah diklaim sebelumnya (Dari ${sumberGrup === GRUP_UTAMA ? 'Grup Utama' : 'Grup Kedua'})`);
-                return;
-            }
-
-            // Tambahkan ke memory agar tidak diklaim lagi
-            claimedLinks.add(link);
-
-            // Buka link
-            const child = spawn('termux-open-url', [link], { detached: true, stdio: 'ignore' });
-            child.unref(); 
-            console.log(`🚀 EKSEKUSI [${sumberGrup === GRUP_UTAMA ? 'UTAMA' : 'KEDUA'}]: ${link}`);
-
-            // Manajemen memori (Maksimal simpan 500 link terbaru)
-            if (claimedLinks.size > 500) {
-                const oldestLink = claimedLinks.values().next().value;
-                claimedLinks.delete(oldestLink);
-            }
-        };
-
         for (let i = 0; i < matches.length; i++) {
             let link = matches[i].startsWith('http') ? matches[i] : 'https://' + matches[i];
-
-            if (from === GRUP_UTAMA) {
-                // EKSEKUSI INSTAN (0 detik)
-                eksekusiLink(link, from);
-            } else if (from === GRUP_KEDUA) {
-                // TUNDA 1 DETIK (Memberi jalan jika Grup Utama sedang memproses)
-                setTimeout(() => {
-                    eksekusiLink(link, from);
-                }, 1000);
-            }
+            const child = spawn('termux-open-url', [link], { detached: true, stdio: 'ignore' });
+            child.unref(); 
+            console.log(`🚀 Link dieksekusi: ${link}`);
         }
     });
 }
