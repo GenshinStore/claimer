@@ -20,6 +20,7 @@ async function startBot() {
     sock.ev.on('creds.update', saveCreds);
 
     // LOGIKA BARU UNTUK KONEKSI & MENAMPILKAN QR MANUAL
+    // LOGIKA BARU UNTUK KONEKSI & MENAMPILKAN QR MANUAL
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -29,12 +30,21 @@ async function startBot() {
             console.log('👆 Silakan scan QR Code di atas!');
         }
 
-        // Jika koneksi terputus, coba sambungkan ulang otomatis
+        // Jika koneksi terputus
         if (connection === 'close') {
-            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== 401; // 401 = Logged out
-            console.log('Koneksi terputus. Mencoba menyambung kembali:', shouldReconnect);
+            const reason = lastDisconnect.error?.output?.statusCode;
+            const shouldReconnect = reason !== 401; // 401 = Logged out
+
+            console.log(`❌ Koneksi terputus! (Kode Error: ${reason})`);
+            console.log('Pesan Error Asli:', lastDisconnect.error?.message);
+
             if (shouldReconnect) {
-                startBot();
+                console.log('🔄 Mencoba menyambung kembali dalam 3 detik...');
+                setTimeout(() => {
+                    startBot();
+                }, 3000); // Diberi jeda 3 detik agar terminal tidak nge-spam
+            } else {
+                console.log('⚠️ Sesi tidak valid atau ter-logout. Silakan hapus folder auth_info_baileys dan scan ulang.');
             }
         } else if (connection === 'open') {
             console.log('⚡ BOT SUPER CEPAT (BAILEYS) SIAP!');
