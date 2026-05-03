@@ -3,15 +3,18 @@ const pino = require('pino');
 const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
-// Definisikan Grup Utama dan Grup Kedua
+// Definisikan Grup
 const GRUP_UTAMA = '120363408426078537@g.us';
-const GRUP_KEDUA = '120363426296094605@g.us'; // Ganti jika ID grup keduamu berbeda
+const GRUP_KEDUA = '120363426296094605@g.us';
 
-const TARGET_GROUP_IDS = [GRUP_UTAMA, GRUP_KEDUA];
+// Set untuk O(1) lookup
+const TARGET_GROUP_IDS = new Set([GRUP_UTAMA, GRUP_KEDUA]);
 
 const linkRegex = /(https?:\/\/)?([\w-]+\.)?(dana\.id|link\.dana\.id|gopay\.co\.id|app\.gopay\.co\.id|shopeepay\.co\.id|shopee\.co\.id\/universal-link)(\/[^\s]*)?/gi;
 
-const claimedLinks = new Set();
+// Memori jangka pendek untuk mencegah duplikasi instan
+const activeLinks = new Set();
+const CACHE_TTL = 10000; // Cache link kedaluwarsa dalam 10 detik
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -25,7 +28,8 @@ async function startBot() {
         logger: pino({ level: 'silent' }),
         browser: ['TermuxClaimer', 'Chrome', '1.0.0'],
         connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 10000
+        keepAliveIntervalMs: 10000,
+        getMessage: async () => ({ conversation: '' }) // Optimasi memori untuk Baileys
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -40,72 +44,56 @@ async function startBot() {
 
         if (connection === 'close') {
             const reason = lastDisconnect.error?.output?.statusCode;
-            const shouldReconnect = reason !== 401; 
-
-            if (shouldReconnect) {
+            if (reason !== 401) {
                 console.log('🔄 Mencoba menyambung kembali dalam 3 detik...');
                 setTimeout(startBot, 3000);
             } else {
                 console.log('⚠️ Sesi tidak valid. Silakan hapus folder auth_info_baileys dan scan ulang.');
             }
         } else if (connection === 'open') {
-            console.log('⚡ BOT SIAP! (Mode Prioritas Grup Aktif)');
+            console.log('⚡ BOT SIAP! (Mode Eksekusi Real-time Aktif)');
         }
     });
 
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify') return;
+        
         const msg = messages[0];
         if (!msg.message) return;
 
         const from = msg.key.remoteJid;
         
-        // Pastikan hanya merespon grup yang ada di daftar
-        if (!TARGET_GROUP_IDS.includes(from)) return;
+        // Pengecekan cepat menggunakan Set.has (Lebih cepat dari Array.includes)
+        if (!TARGET_GROUP_IDS.has(from)) return;
 
         const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
         if (!text) return;
 
+        // Pengecekan kata kunci sebelum memproses Regex (Fast-fail check)
         const bodyLower = text.toLowerCase();
         if (!bodyLower.includes('dana') && !bodyLower.includes('gopay') && !bodyLower.includes('shopee')) return;
 
         const matches = text.match(linkRegex);
         if (!matches) return;
 
-        // Fungsi khusus untuk memproses link
-        const eksekusiLink = (link, sumberGrup) => {
-            // Cek apakah link sudah ada di memory
-            if (claimedLinks.has(link)) {
-                console.log(`⏭️ SKIP: Link sudah diklaim sebelumnya (Dari ${sumberGrup === GRUP_UTAMA ? 'Grup Utama' : 'Grup Kedua'})`);
-                return;
-            }
-
-            // Tambahkan ke memory agar tidak diklaim lagi
-            claimedLinks.add(link);
-
-            // Buka link
-            const child = spawn('termux-open-url', [link], { detached: true, stdio: 'ignore' });
-            child.unref(); 
-            console.log(`🚀 EKSEKUSI [${sumberGrup === GRUP_UTAMA ? 'UTAMA' : 'KEDUA'}]: ${link}`);
-
-            // Manajemen memori (Maksimal simpan 500 link terbaru)
-            if (claimedLinks.size > 500) {
-                const oldestLink = claimedLinks.values().next().value;
-                claimedLinks.delete(oldestLink);
-            }
-        };
-
+        // Eksekusi semua link yang ditemukan secepat mungkin
         for (let i = 0; i < matches.length; i++) {
             let link = matches[i].startsWith('http') ? matches[i] : 'https://' + matches[i];
 
-            if (from === GRUP_UTAMA) {
-                // EKSEKUSI INSTAN (0 detik)
-                eksekusiLink(link, from);
-            } else if (from === GRUP_KEDUA) {
-                // TUNDA 1 DETIK (Memberi jalan jika Grup Utama sedang memproses)
-                setTimeout(() => {
-                    eksekusiLink(link, from);
-                }, 1000);
+            // Cek duplikasi real-time
+            if (!activeLinks.has(link)) {
+                // Langsung daftarkan ke cache untuk memblokir duplikat dari grup lain dalam milidetik yang sama
+                activeLinks.add(link);
+                
+                // Hapus dari cache setelah 10 detik agar tidak membebani memori
+                setTimeout(() => activeLinks.delete(link), CACHE_TTL);
+
+                // Eksekusi link via Termux secara asynchronous tanpa menunggu
+                spawn('termux-open-url', [link], { detached: true, stdio: 'ignore' }).unref();
+                
+                console.log(`🚀 EKSEKUSI [${from === GRUP_UTAMA ? 'Grup 1' : 'Grup 2'}]: ${link}`);
+            } else {
+                console.log(`⏭️ SKIP DUPLIKAT: ${link}`);
             }
         }
     });
