@@ -1,20 +1,46 @@
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
+const open = require('open');
 
+// ===== CONFIG =====
 const GRUP_UTAMA = '120363408426078537@g.us';
 const GRUP_KEDUA = '120363426296094605@g.us';
-
 const TARGET_GROUP_IDS = new Set([GRUP_UTAMA, GRUP_KEDUA]);
 
-// Regex dipersingkat (lebih cepat)
-const linkRegex = /(dana\.id|link\.dana\.id|gopay\.co\.id|shopee\.co\.id)[^\s]*/gi;
+// Domain target (tanpa regex biar cepat)
+const DOMAINS = ['dana.id', 'link.dana.id', 'gopay.co.id', 'shopee.co.id'];
 
-// Cache ultra ringan
+// Cache anti duplicate (ultra cepat)
 const activeLinks = new Set();
-const CACHE_TTL = 5000; // dipercepat jadi 5 detik
 
+// ===== FUNCTION PARSE LINK SUPER CEPAT =====
+function extractLinks(text) {
+    const results = [];
+
+    for (let d = 0; d < DOMAINS.length; d++) {
+        const domain = DOMAINS[d];
+        let idx = text.indexOf(domain);
+
+        while (idx !== -1) {
+            let end = text.indexOf(' ', idx);
+            if (end === -1) end = text.length;
+
+            let link = text.slice(idx, end);
+
+            if (!link.startsWith('http')) {
+                link = 'https://' + link;
+            }
+
+            results.push(link);
+            idx = text.indexOf(domain, idx + 1);
+        }
+    }
+
+    return results;
+}
+
+// ===== START BOT =====
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -22,9 +48,15 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'fatal' }), // lebih ringan dari silent
-        connectTimeoutMs: 20000,
-        keepAliveIntervalMs: 5000,
+        logger: pino({ level: 'silent' }), // tanpa log = lebih cepat
+        connectTimeoutMs: 15000,
+        keepAliveIntervalMs: 4000,
+
+        // optimasi tambahan
+        markOnlineOnConnect: false,
+        syncFullHistory: false,
+        emitOwnEvents: false,
+
         getMessage: async () => null
     });
 
@@ -33,13 +65,14 @@ async function startBot() {
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
         if (qr) {
             qrcode.generate(qr, { small: true });
-            console.log('Scan QR');
+            console.log('Scan QR...');
         }
 
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
+
             if (reason !== 401) {
-                setTimeout(startBot, 1000); // reconnect lebih cepat
+                setTimeout(startBot, 800); // reconnect cepat
             }
         }
 
@@ -57,41 +90,43 @@ async function startBot() {
         const from = msg.key.remoteJid;
         if (!TARGET_GROUP_IDS.has(from)) return;
 
+        // ambil text paling cepat
         const text =
             msg.message.conversation ||
             msg.message.extendedTextMessage?.text;
 
         if (!text) return;
 
-        // FAST FILTER (tanpa toLowerCase global)
+        // fast filter (tanpa toLowerCase)
         if (
             text.indexOf('dana') === -1 &&
             text.indexOf('gopay') === -1 &&
             text.indexOf('shopee') === -1
         ) return;
 
-        const matches = text.match(linkRegex);
-        if (!matches) return;
+        const links = extractLinks(text);
+        if (!links.length) return;
 
-        for (let i = 0; i < matches.length; i++) {
-            let link = matches[i].startsWith('http')
-                ? matches[i]
-                : 'https://' + matches[i];
+        for (let i = 0; i < links.length; i++) {
+            const link = links[i];
 
             if (activeLinks.has(link)) continue;
 
             activeLinks.add(link);
-            setTimeout(() => activeLinks.delete(link), CACHE_TTL);
 
-            // ⚡ FIRE & FORGET (tanpa blocking)
-            spawn('termux-open-url', [link], {
-                detached: true,
-                stdio: 'ignore'
-            }).unref();
+            // cleanup ringan (tanpa setTimeout banyak)
+            if (activeLinks.size > 500) {
+                activeLinks.clear();
+            }
 
-            console.log('🚀', link);
+            // 🚀 OPEN SUPER CEPAT (tanpa spawn)
+            open(link);
+
+            // log minimal (optional, bisa dihapus total)
+            // console.log(link);
         }
     });
 }
 
+// ===== RUN =====
 startBot();
