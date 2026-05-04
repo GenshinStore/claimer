@@ -1,25 +1,26 @@
+// ===== IMPORT =====
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
-const open = require('open');
+const { exec } = require('child_process');
 
 // ===== CONFIG =====
 const GRUP_UTAMA = '120363408426078537@g.us';
 const GRUP_KEDUA = '120363426296094605@g.us';
 const TARGET_GROUP_IDS = new Set([GRUP_UTAMA, GRUP_KEDUA]);
 
-// Domain target (tanpa regex biar cepat)
+// Domain target (tanpa regex biar super cepat)
 const DOMAINS = ['dana.id', 'link.dana.id', 'gopay.co.id', 'shopee.co.id'];
 
-// Cache anti duplicate (ultra cepat)
+// Cache anti duplicate
 const activeLinks = new Set();
 
 // ===== FUNCTION PARSE LINK SUPER CEPAT =====
 function extractLinks(text) {
     const results = [];
 
-    for (let d = 0; d < DOMAINS.length; d++) {
-        const domain = DOMAINS[d];
+    for (let i = 0; i < DOMAINS.length; i++) {
+        const domain = DOMAINS[i];
         let idx = text.indexOf(domain);
 
         while (idx !== -1) {
@@ -48,11 +49,11 @@ async function startBot() {
     const sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'silent' }), // tanpa log = lebih cepat
+        logger: pino({ level: 'silent' }),
+
         connectTimeoutMs: 15000,
         keepAliveIntervalMs: 4000,
 
-        // optimasi tambahan
         markOnlineOnConnect: false,
         syncFullHistory: false,
         emitOwnEvents: false,
@@ -90,14 +91,14 @@ async function startBot() {
         const from = msg.key.remoteJid;
         if (!TARGET_GROUP_IDS.has(from)) return;
 
-        // ambil text paling cepat
+        // Ambil text paling cepat
         const text =
             msg.message.conversation ||
             msg.message.extendedTextMessage?.text;
 
         if (!text) return;
 
-        // fast filter (tanpa toLowerCase)
+        // Fast filter (tanpa toLowerCase)
         if (
             text.indexOf('dana') === -1 &&
             text.indexOf('gopay') === -1 &&
@@ -114,16 +115,13 @@ async function startBot() {
 
             activeLinks.add(link);
 
-            // cleanup ringan (tanpa setTimeout banyak)
+            // Batasi ukuran cache biar ringan
             if (activeLinks.size > 500) {
                 activeLinks.clear();
             }
 
-            // 🚀 OPEN SUPER CEPAT (tanpa spawn)
-            open(link);
-
-            // log minimal (optional, bisa dihapus total)
-            // console.log(link);
+            // 🚀 EKSEKUSI PALING CEPAT DI TERMUX
+            exec(`termux-open-url "${link}"`, { stdio: 'ignore' });
         }
     });
 }
