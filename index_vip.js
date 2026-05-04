@@ -23,8 +23,8 @@ setInterval(() => {
     
     // OFF pukul 04:50, ON pukul 06:00
     if (hours === 4 && minutes >= 50) isBotActive = false;
-    else if (hours === 5) isBotActive = false;
-    else if (hours === 6 && minutes >= 0) isBotActive = true;
+    // else if (hours === 5) isBotActive = false;
+    else if (hours === 5 && minutes >= 0) isBotActive = true;
 }, 60000);
 
 async function startBot() {
