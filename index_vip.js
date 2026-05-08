@@ -4,7 +4,7 @@ const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
 const TARGET_GROUP_IDS = new Set([
-    '120363408426078537@g.us', 
+    // '120363408426078537@g.us', 
     '120363426296094605@g.us'
 ]);
 
@@ -12,7 +12,7 @@ const TARGET_GROUP_IDS = new Set([
 const linkRegex = /(?:https?:\/\/)?(?:dana\.id|link\.dana\.id|gopay\.co\.id|shopee\.co\.id)[^\s]+/gi;
 
 const activeLinks = new Set();
-const CACHE_TTL = 5000;
+const CACHE_TTL = 1000;
 
 // Fitur Auto-Schedule untuk menjaga stabilitas memori & sesi WhatsApp
 let isBotActive = true;
