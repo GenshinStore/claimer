@@ -3,13 +3,20 @@ const pino = require('pino');
 const { spawn } = require('child_process');
 const qrcode = require('qrcode-terminal');
 
+// ================= CONFIGURATION =================
+const MODE_ALL_GROUPS = false; // Ubah ke true untuk scan semua grup, false untuk fokus 1 grup prioritas
+const PRIORITY_GROUP_ID = '120363426296094605@g.us'; // Target utama jika mode false
+
 const TARGET_GROUP_IDS = new Set([
-    // '120363408426078537@g.us', 
+    '120363408426078537@g.us', 
     '120363426296094605@g.us'
 ]);
 
-// Optimasi Regex: Gunakan Non-Capturing Group (?:) agar engine regex tidak menyimpan memori pencocokan, jauh lebih cepat
+// Optimasi Regex: Gunakan Non-Capturing Group (?:) agar engine regex tidak menyimpan memori pencocokan
 const linkRegex = /(?:https?:\/\/)?(?:dana\.id|link\.dana\.id|gopay\.co\.id|shopee\.co\.id)[^\s]+/gi;
+
+// Fast Regex untuk menggantikan toLowerCase().includes() yang boros RAM
+const fastFilterRegex = /dana|gopay|shopee/i; 
 
 const activeLinks = new Set();
 const CACHE_TTL = 1000;
@@ -21,9 +28,7 @@ setInterval(() => {
     const hours = now.getHours();
     const minutes = now.getMinutes();
     
-    // OFF pukul 04:50, ON pukul 06:00
     if (hours === 4 && minutes >= 50) isBotActive = false;
-    // else if (hours === 5) isBotActive = false;
     else if (hours === 5 && minutes >= 0) isBotActive = true;
 }, 60000);
 
@@ -39,7 +44,8 @@ async function startBot() {
         keepAliveIntervalMs: 5000,
         getMessage: async () => null,
         syncFullHistory: false, // Mempercepat startup awal
-        markOnlineOnConnect: false // Bypass delay update status online
+        markOnlineOnConnect: false, // Bypass delay update status online
+        generateHighQualityLinkPreviews: false // OPTIMASI: Mencegah Baileys memproses link di background
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -50,7 +56,9 @@ async function startBot() {
             const reason = lastDisconnect?.error?.output?.statusCode;
             if (reason !== 401) setTimeout(startBot, 500); // Reconnect lebih brutal (500ms)
         }
-        if (connection === 'open') console.log('⚡ BOT SIAP: MODE EXTREME SPEED');
+        if (connection === 'open') {
+            console.log(`⚡ BOT SIAP: MODE EXTREME SPEED | TARGET: ${MODE_ALL_GROUPS ? 'SEMUA GRUP' : '1 GRUP PRIORITAS'}`);
+        }
     });
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
@@ -60,21 +68,28 @@ async function startBot() {
         const msg = messages[0];
         const from = msg?.key?.remoteJid;
 
-        if (!from || !TARGET_GROUP_IDS.has(from)) return;
+        if (!from) return;
+
+        // Pengecekan Mode Grup (O(1) sangat cepat)
+        if (MODE_ALL_GROUPS) {
+            if (!TARGET_GROUP_IDS.has(from)) return; // Cek semua grup
+        } else {
+            if (from !== PRIORITY_GROUP_ID) return; // Langsung potong jika bukan grup utama
+        }
 
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
         
         // Short-circuit: Link terpendek butuh minimal ~15 karakter, buang langsung jika kurang
         if (!text || text.length < 15) return; 
 
-        // Fix logic asli: Ubah ke lowercase agar tidak melewatkan teks dengan huruf besar (misal: "DANA")
-        const lowerText = text.toLowerCase();
+        // C++ native regex test jauh lebih cepat daripada alokasi memori text.toLowerCase()
+        if (!fastFilterRegex.test(text)) return;
 
-        // Fast Filter sebelum Regex (jauh lebih ringan)
-        if (!lowerText.includes('dana') && !lowerText.includes('gopay') && !lowerText.includes('shopee')) return;
-
+        // FIX BUG PENTING: Harus reset lastIndex jika menggunakan regex global (/g) di dalam loop
+        linkRegex.lastIndex = 0; 
+        
         let match;
-        // Gunakan RegExp.exec dalam loop. Di V8 Node.js, exec lebih cepat daripada .match() untuk mencari semua string
+        // Gunakan RegExp.exec dalam loop. Di V8 Node.js, exec lebih cepat daripada .match()
         while ((match = linkRegex.exec(text)) !== null) {
             let link = match[0];
 
@@ -93,7 +108,7 @@ async function startBot() {
             activeLinks.add(link);
             setTimeout(() => activeLinks.delete(link), CACHE_TTL);
 
-            // BYPASS SCRIPT WRAPPER - Tembak Intent Android Langsung
+            // BYPASS SCRIPT WRAPPER - Tembak Intent Android Langsung via am start Termux
             spawn('am', ['start', '-a', 'android.intent.action.VIEW', '-d', link], {
                 detached: true,
                 stdio: 'ignore'
