@@ -54,7 +54,7 @@ async function startBot() {
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
-            if (reason !== 401) setTimeout(startBot, 500); // Reconnect lebih brutal (500ms)
+            if (reason !== 401) setTimeout(startBot, 1000); // Reconnect lebih brutal (500ms)
         }
         if (connection === 'open') {
             console.log(`⚡ BOT SIAP: MODE EXTREME SPEED | TARGET: ${MODE_ALL_GROUPS ? 'SEMUA GRUP' : '1 GRUP PRIORITAS'}`);
